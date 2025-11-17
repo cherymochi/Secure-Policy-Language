@@ -1,0 +1,119 @@
+(*
+    Secure Policy Language (SPL) - Complete Grammar (EBNF Format)
+    University of Technology, Jamaica - CIT4004
+    Analysis of Programming Languages Project
+    
+    Team Members:
+    - Javido Robinson - 1707486
+    - Athaliah Knight - 1804360
+    - Nathalea Evans - 2101707
+    - Shemmar Ricketts - 2005329
+    
+    Notes:
+    - Attribute names 'can', 'path', and 'action' are matched case-insensitively
+      by the lexer (both 'can'/'CAN', 'path'/'PATH', 'action'/'ACTION' are recognized).
+      The grammar shows lowercase for consistency with typical usage.
+    - The '*' symbol is tokenized as either WILDCARD or TIMES based on context:
+      * WILDCARD: When used in permission contexts (after 'can:', 'action:', 'path:' or inside braces)
+      * TIMES: When used in arithmetic expressions (between numbers/identifiers)
+      The lexer automatically determines the correct token type during tokenization.
+*)
+
+(* ============================================
+   TOP LEVEL PROGRAM STRUCTURE
+   ============================================ *)
+program ::= declaration*
+
+declaration ::= role_def | user_def | resource_def | policy_def
+
+(* ============================================
+   ROLE DEFINITIONS
+   ============================================ *)
+role_def ::= 'ROLE' identifier '{' role_attributes '}'
+
+role_attributes ::= role_attribute (',' role_attribute)*
+
+role_attribute ::= 'can' ':' action_list
+
+action_list ::= wildcard | action_item (',' action_item)*
+
+action_item ::= identifier
+
+wildcard ::= '*'
+
+(* ============================================
+   USER DEFINITIONS
+   ============================================ *)
+user_def ::= 'USER' identifier '{' user_attributes '}'
+
+user_attributes ::= user_attribute (',' user_attribute)*
+
+user_attribute ::= 'role' ':' identifier
+
+(* ============================================
+   RESOURCE DEFINITIONS
+   ============================================ *)
+resource_def ::= 'RESOURCE' identifier '{' resource_attributes '}'
+
+resource_attributes ::= resource_attribute (',' resource_attribute)*
+
+resource_attribute ::= 'path' ':' string_literal
+
+(* ============================================
+   POLICY DEFINITIONS
+   ============================================ *)
+policy_def ::= policy_type action_clause 'ON' resource_clause ('IF' condition)?
+
+policy_type ::= 'ALLOW' | 'DENY'
+
+action_clause ::= 'action' ':' action_list
+
+resource_clause ::= 'resource' ':' resource_path
+
+resource_path ::= identifier | string_literal
+
+(* ============================================
+   CONDITIONS AND EXPRESSIONS
+   ============================================ *)
+condition ::= boolean_expr
+
+boolean_expr ::= boolean_term (('AND' | 'OR') boolean_term)*
+
+boolean_term ::= comparison_expr | '(' boolean_expr ')'
+
+comparison_expr ::= arithmetic_expr comparison_op arithmetic_expr
+
+comparison_op ::= '==' | '!=' | '<' | '>' | '<=' | '>='
+
+(* ============================================
+   ARITHMETIC EXPRESSIONS (PEMDAS/BODMAS)
+   ============================================ *)
+arithmetic_expr ::= term (('+' | '-') term)*
+
+term ::= factor (('*' | '/') factor)*
+
+factor ::= number_literal 
+         | identifier 
+         | attribute_access 
+         | '(' arithmetic_expr ')' 
+         | ('+' | '-') factor
+
+attribute_access ::= identifier '.' identifier
+
+(* ============================================
+   LITERALS
+   ============================================ *)
+identifier ::= [a-zA-Z_][a-zA-Z0-9_]*
+
+number_literal ::= digit+
+
+digit ::= [0-9]
+
+string_literal ::= '"' [^"]* '"'
+
+(* ============================================
+   COMMENTS (optional, for future enhancement)
+   ============================================ *)
+(* Single-line comment: // ... *)
+(* Multi-line comment: /* ... */ *)
+
