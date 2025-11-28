@@ -1,11 +1,13 @@
 import sys
 from parser import parser 
 from symbol_table import SymbolTable
+from security_rules import SecurityScanner
 
 class SemanticAnalyzer:
     def __init__(self):
         self.symtab = SymbolTable()
         self.errors = []
+        self.security_risks = []
 
     def log_error(self, message, line):
         self.errors.append(f"[Line {line}] SEMANTIC ERROR: {message}")
@@ -41,20 +43,157 @@ class SemanticAnalyzer:
     def visit_RESOURCE_DEF(self, node):
         data = node[1]
         try:
-            self.symtab.define_resource(data['name'], data['path'])
+            # Handle both old format (path only) and new format (attributes dict)
+            if 'attributes' in data:
+                self.symtab.define_resource(data['name'], data['attributes'])
+            elif 'path' in data:
+                # Backward compatibility: old format with just path
+                self.symtab.define_resource(data['name'], data['path'])
+            else:
+                self.log_error("Resource definition missing 'path' attribute", data['line'])
         except ValueError as e:
             self.log_error(str(e), data['line'])
+
+    def visit_CONST_DEF(self, node):
+        data = node[1]
+        try:
+            self.symtab.define_constant(data['name'], data['value'])
+        except ValueError as e:
+            self.log_error(str(e), data['line'])
+
+    def visit_CALL_DEF(self, node):
+        data = node[1]
+        call_type = data['type']
+        name = data.get('name')
+        
+        try:
+            if call_type == 'ROLE':
+                if name:
+                    result = self.symtab.query_role(name)
+                    if result:
+                        print(f"[CALL ROLE {name}] {result}")
+                    else:
+                        self.log_error(f"Role '{name}' not found", data['line'])
+                else:
+                    results = self.symtab.query_roles()
+                    if results:
+                        print(f"[CALL ROLE] Found {len(results)} role(s):")
+                        for r in results:
+                            print(f"[CALL ROLE] {r}")
+                    else:
+                        print("[CALL ROLE] No roles defined")
+            elif call_type == 'RESOURCE':
+                if name:
+                    result = self.symtab.query_resource(name)
+                    if result:
+                        print(f"[CALL RESOURCE {name}] {result}")
+                    else:
+                        self.log_error(f"Resource '{name}' not found", data['line'])
+                else:
+                    results = self.symtab.query_resources()
+                    if results:
+                        print(f"[CALL RESOURCE] Found {len(results)} resource(s):")
+                        for r in results:
+                            print(f"[CALL RESOURCE] {r}")
+                    else:
+                        print("[CALL RESOURCE] No resources defined")
+            elif call_type == 'USER':
+                if name:
+                    result = self.symtab.query_user(name)
+                    if result:
+                        print(f"[CALL USER {name}] {result}")
+                    else:
+                        self.log_error(f"User '{name}' not found", data['line'])
+                else:
+                    results = self.symtab.query_users()
+                    if results:
+                        print(f"[CALL USER] Found {len(results)} user(s):")
+                        for r in results:
+                            print(f"[CALL USER] {r}")
+                    else:
+                        print("[CALL USER] No users defined")
+            elif call_type == 'CONST':
+                if name:
+                    result = self.symtab.query_constant(name)
+                    if result:
+                        print(f"[CALL CONST {name}] {result}")
+                    else:
+                        self.log_error(f"Constant '{name}' not found", data['line'])
+                else:
+                    results = self.symtab.query_constants()
+                    if results:
+                        print(f"[CALL CONST] Found {len(results)} constant(s):")
+                        for r in results:
+                            print(f"[CALL CONST] {r}")
+                    else:
+                        print("[CALL CONST] No constants defined")
+            elif call_type == 'POLICY':
+                if name:
+                    result = self.symtab.query_policy(name)
+                    if result:
+                        print(f"[CALL POLICY {name}]")
+                        for line in result.split('\n'):
+                            print(f"[CALL POLICY {name}] {line}")
+                    else:
+                        self.log_error(f"Policy '{name}' not found", data['line'])
+                else:
+                    results = self.symtab.query_policies()
+                    if results:
+                        print(f"[CALL POLICY] Found {len(results)} policy/policies:")
+                        for r in results:
+                            print(f"[CALL POLICY] {r}")
+                    else:
+                        print("[CALL POLICY] No policies defined")
+            else:
+                self.log_error(f"Unknown CALL type: {call_type}", data['line'])
+        except Exception as e:
+            self.log_error(f"CALL error: {str(e)}", data['line'])
 
     def visit_USER_DEF(self, node):
         data = node[1]
         try:
-            self.symtab.define_user(data['name'], data['role'])
+            # Handle both old format (single role) and new format (multiple roles)
+            roles = data.get('roles', data.get('role'))
+            if roles is None:
+                self.log_error("User definition missing role(s)", data['line'])
+            else:
+                # define_user will validate roles using lookup (checks current and parent scopes)
+                self.symtab.define_user(data['name'], roles)
         except ValueError as e:
             self.log_error(str(e), data['line'])
+
+    def visit_POLICY_DEF(self, node):
+        data = node[1]
+        policy_name = data['name']
+        body = data['body']  # Changed from 'rules' to 'body' - can contain any statements
+        
+        try:
+            # Enter POLICY scope
+            self.symtab.enter_scope(f"POLICY_{policy_name}")
+            
+            # Process all statements in the policy body
+            for stmt in body:
+                self.visit(stmt)
+            
+            # Store the policy definition (with full body)
+            self.symtab.define_policy(policy_name, body)
+            
+            # Exit POLICY scope
+            self.symtab.exit_scope()
+        except ValueError as e:
+            self.log_error(str(e), data['line'])
+            # Make sure we exit scope even on error
+            if len(self.symtab.scope_stack) > 1:
+                self.symtab.exit_scope()
 
     def visit_POLICY_RULE(self, node):
         data = node[1]
         line = data['line']
+        
+        # Only add to policies list if it's a standalone rule (not inside a POLICY block)
+        # Policy blocks are handled by visit_POLICY_DEF
+        # Check if we're inside a policy definition by checking the parent context
+        # For now, we'll add it and let POLICY_DEF handle the grouping
         
         # 1. Check Binding (Resource Existence)
         try:
@@ -64,7 +203,7 @@ class SemanticAnalyzer:
             # Continue to analyze condition even if binding fails
 
         # 2. Check Scope & Types (Condition Validity)
-        condition_type = self.analyze_expression(data['condition'], line)
+        condition_type = self.analyze_expression(data.get('condition'), line)
         
         # 3. Ensure Condition is Boolean
         if condition_type and condition_type != 'bool':
@@ -129,24 +268,28 @@ class SemanticAnalyzer:
             obj = node[1]
             attr = node[2]
             attr_type = self.symtab.resolve_attribute(obj, attr)
-            if attr_type:
-                return attr_type
+            if attr_type is not None:
+                return attr_type  # Returns the actual type (e.g., 'int', 'str')
             else:
                 self.log_error(f"Unknown or invalid attribute '{obj}.{attr}'", line_num)
                 return None
 
         elif tag == 'VAR':
             var_name = node[1]
-            # Simple variable resolution logic or error
-            # For now, assuming only attributes are strongly typed in context
-            # Could check symtab.resolve_variable if needed
+            # Check if it's a constant (using lookup which checks current and parent scopes)
+            const_value = self.symtab.lookup_constant(var_name)
+            if const_value is not None:
+                # Determine type based on value
+                if isinstance(const_value, int):
+                    return 'int'
+                elif isinstance(const_value, str):
+                    return 'str'
+                else:
+                    return 'unknown'
+            # Check if it's in context
             if self.symtab.resolve_variable(var_name):
-                 # In a real compiler, we'd need to know the type of the variable.
-                 # For this simplified SPL, maybe assume 'str' or 'int' based on usage?
-                 # Or just return None/Error if we strictly want object.attribute syntax.
-                 # Let's check context for top-level vars if any
-                 return 'unknown' 
-            self.log_error(f"Unknown variable '{var_name}'", line_num)
+                return 'unknown'  # Context variables
+            self.log_error(f"Unknown variable or constant '{var_name}'", line_num)
             return None
 
         elif tag == 'NUM':
@@ -174,11 +317,24 @@ class SemanticAnalyzer:
         else:
             print("No semantic errors found.")
             print(self.symtab)
+            
+            # --- SECURITY SCAN ---
+            print("\n=== SECURITY SCAN START ===")
+            scanner = SecurityScanner(self.symtab)
+            self.security_risks = scanner.scan()
+            
+            if self.security_risks:
+                print(f"Found {len(self.security_risks)} potential security risks:")
+                for risk in self.security_risks:
+                    print(f"  [{risk['level']}] Line {risk['line']}: {risk['message']}")
+            else:
+                print("No security risks found.")
+            print("=== SECURITY SCAN COMPLETE ===")
 
 if __name__ == "__main__":
     analyzer = SemanticAnalyzer()
     
-    # Test Data with Intentional Errors
+    # Test Data with Intentional Risks (but valid syntax)
     code = """
     ROLE Admin {can: *}
     RESOURCE DB_Finance {path: "/data/financial"}
@@ -186,14 +342,14 @@ if __name__ == "__main__":
     # Line 6: Valid User
     USER Jane { role: Admin }
     
-    # Line 9: Error (Role 'Hacker' not defined)
-    USER Bob { role: Hacker } 
+    # Line 9: Overly permissive rule
+    ALLOW action: * ON resource: DB_Finance IF (time.hour > 9)
     
-    # Line 12: Type Error (weather.snow is int, comparing to string)
-    ALLOW action: read ON resource: DB_Finance IF (weather.snow > "high")
+    # Line 12: Conflicting rule 1
+    ALLOW action: write ON resource: DB_Finance IF (time.hour > 17)
     
-    # Line 15: valid
-    ALLOW action: write ON resource: DB_Finance IF (time.hour > 17 AND user.role == "intern")
+    # Line 15: Conflicting rule 2
+    DENY action: write ON resource: DB_Finance IF (time.hour < 5)
     """
     
     print(f"Processing Code:\n{code}")

@@ -24,7 +24,7 @@
    ============================================ *)
 program ::= declaration*
 
-declaration ::= role_def | user_def | resource_def | policy_def
+declaration ::= role_def | user_def | resource_def | const_def | call_def | named_policy_def | rule_def
 
 (* ============================================
    ROLE DEFINITIONS
@@ -48,7 +48,24 @@ user_def ::= 'USER' identifier '{' user_attributes '}'
 
 user_attributes ::= user_attribute (',' user_attribute)*
 
-user_attribute ::= 'role' ':' identifier
+user_attribute ::= 'role' ':' role_list
+
+role_list ::= identifier (',' identifier)*
+
+(* ============================================
+   CONSTANT DEFINITIONS
+   ============================================ *)
+const_def ::= 'CONST' identifier '=' const_value
+
+const_value ::= number_literal | string_literal
+
+(* ============================================
+   CALL STATEMENTS (Query/Debug)
+   ============================================ *)
+call_def ::= 'CALL' call_type
+           | 'CALL' call_type identifier
+
+call_type ::= 'ROLE' | 'RESOURCE' | 'USER' | 'CONST' | 'POLICY'
 
 (* ============================================
    RESOURCE DEFINITIONS
@@ -58,11 +75,42 @@ resource_def ::= 'RESOURCE' identifier '{' resource_attributes '}'
 resource_attributes ::= resource_attribute (',' resource_attribute)*
 
 resource_attribute ::= 'path' ':' string_literal
+                      | identifier ':' resource_value
+
+resource_value ::= string_literal
+                  | number_literal
+                  | array_literal
+
+array_literal ::= '[' array_elements ']'
+
+array_elements ::= string_literal (',' string_literal)*
+                  | (* empty *)
 
 (* ============================================
-   POLICY DEFINITIONS
+   STATEMENT (Used in policy bodies)
    ============================================ *)
-policy_def ::= policy_type action_clause 'ON' resource_clause ('IF' condition)?
+statement ::= role_def 
+            | user_def 
+            | resource_def 
+            | const_def 
+            | call_def 
+            | named_policy_def 
+            | rule_def
+
+(* ============================================
+   NAMED POLICY DEFINITIONS (Function-like)
+   ============================================ *)
+named_policy_def ::= 'POLICY' identifier '{' policy_body '}'
+
+policy_body ::= statement*
+                | (* empty *)
+
+(* ============================================
+   POLICY DEFINITIONS (Standalone Rules)
+   ============================================ *)
+policy_def ::= rule_def
+
+rule_def ::= policy_type action_clause 'ON' resource_clause ('IF' condition)?
 
 policy_type ::= 'ALLOW' | 'DENY'
 
@@ -112,8 +160,14 @@ digit ::= [0-9]
 string_literal ::= '"' [^"]* '"'
 
 (* ============================================
-   COMMENTS (optional, for future enhancement)
+   COMMENTS
    ============================================ *)
-(* Single-line comment: // ... *)
-(* Multi-line comment: /* ... */ *)
+(* 
+   Comments are supported in two styles:
+   - Single-line: // comment text
+   - Multi-line: /* comment text */
+   
+   Comments are ignored by the lexer and do not affect parsing.
+   Multi-line comments can span multiple lines and properly track line numbers.
+*)
 
