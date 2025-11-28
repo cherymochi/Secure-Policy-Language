@@ -112,11 +112,24 @@ def p_policy_body_empty(p):
     p[0] = []
 
 def p_rule_def(p):
-    '''rule_def : ALLOW action_clause ON resource_clause IF expression
+    '''rule_def : IF expression THEN policy_type action_clause ON resource_clause ELSE policy_type action_clause ON resource_clause
+                | ALLOW action_clause ON resource_clause IF expression
                 | DENY action_clause ON resource_clause IF expression
                 | ALLOW action_clause ON resource_clause
                 | DENY action_clause ON resource_clause'''
-    if len(p) == 7:  # Has IF condition
+    if len(p) == 13:  # IF-THEN-ELSE form
+        p[0] = ('POLICY_RULE', {
+            'type': 'CONDITIONAL',
+            'condition': p[2],
+            'then_type': p[4],
+            'then_actions': p[5],
+            'then_resource': p[7],
+            'else_type': p[9],
+            'else_actions': p[10],
+            'else_resource': p[12],
+            'line': p.lineno(1)
+        })
+    elif len(p) == 7:  # Has IF condition
         p[0] = ('POLICY_RULE', {
             'type': p[1],
             'actions': p[2],
@@ -134,6 +147,11 @@ def p_rule_def(p):
         })
 
 # --- HELPERS ---
+def p_policy_type(p):
+    '''policy_type : ALLOW
+                   | DENY'''
+    p[0] = p[1]
+
 def p_action_clause(p):
     'action_clause : ACTION COLON id_list'
     p[0] = p[3]

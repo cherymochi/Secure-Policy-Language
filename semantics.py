@@ -190,11 +190,57 @@ class SemanticAnalyzer:
         data = node[1]
         line = data['line']
         
-        # Only add to policies list if it's a standalone rule (not inside a POLICY block)
-        # Policy blocks are handled by visit_POLICY_DEF
-        # Check if we're inside a policy definition by checking the parent context
-        # For now, we'll add it and let POLICY_DEF handle the grouping
+        # Handle IF-THEN-ELSE conditional rules
+        if data.get('type') == 'CONDITIONAL':
+            # Check condition
+            condition_type = self.analyze_expression(data.get('condition'), line)
+            if condition_type and condition_type != 'bool':
+                self.log_error(f"Conditional policy condition must evaluate to 'bool', got '{condition_type}'", line)
+            
+            # Check THEN clause resources
+            try:
+                if not self.symtab.lookup_resource(data['then_resource']):
+                    self.log_error(f"Conditional policy THEN clause refers to undefined resource '{data['then_resource']}'", line)
+            except:
+                pass
+            
+            # Check ELSE clause resources
+            try:
+                if not self.symtab.lookup_resource(data['else_resource']):
+                    self.log_error(f"Conditional policy ELSE clause refers to undefined resource '{data['else_resource']}'", line)
+            except:
+                pass
+            
+            # Add both THEN and ELSE as separate policies for evaluation
+            # THEN policy
+            then_policy = {
+                'type': data['then_type'],
+                'actions': data['then_actions'],
+                'resource': data['then_resource'],
+                'condition': data['condition'],
+                'line': line
+            }
+            try:
+                self.symtab.add_policy(then_policy)
+            except ValueError as e:
+                self.log_error(str(e), line)
+            
+            # ELSE policy (with negated condition)
+            else_policy = {
+                'type': data['else_type'],
+                'actions': data['else_actions'],
+                'resource': data['else_resource'],
+                'condition': ('UNARY_OP', 'NOT', data['condition']),  # Negate condition for ELSE
+                'line': line
+            }
+            try:
+                self.symtab.add_policy(else_policy)
+            except ValueError as e:
+                self.log_error(str(e), line)
+            
+            return
         
+        # Regular policy rules (ALLOW/DENY with optional IF)
         # 1. Check Binding (Resource Existence)
         try:
             self.symtab.add_policy(data)

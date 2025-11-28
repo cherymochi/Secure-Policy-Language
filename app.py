@@ -186,6 +186,10 @@ ALLOW action: read, write ON resource: DB_Finance IF (time.hour >= START_HOUR AN
 // Policy with day restrictions
 ALLOW action: read ON resource: DB_Logs IF (time.day != "Saturday" AND time.day != "Sunday")
 
+// Conditional policy using IF-THEN-ELSE
+// During business hours: allow write, otherwise deny
+IF (time.hour >= START_HOUR AND time.hour <= END_HOUR) THEN ALLOW action: write ON resource: DB_Finance ELSE DENY action: write ON resource: DB_Finance
+
 // Query what we've defined
 CALL ROLE
 CALL RESOURCE
@@ -659,3 +663,4 @@ with tab_ai:
 if not st.session_state.get('run_trigger', False):
     with tab_console:
         st.info("Ready. Click ▶ RUN to compile.")
+
